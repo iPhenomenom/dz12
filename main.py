@@ -1,26 +1,14 @@
-from fastapi import FastAPI, HTTPException, Depends
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Date, create_engine
-from sqlalchemy.orm import relationship, Session, sessionmaker
+from fastapi import FastAPI, HTTPException, Depends, status
+from sqlalchemy import Column, Integer, String, Boolean, Date, create_engine
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.orm import declarative_base
-from sqlalchemy import create_engine
 from typing import List, Optional
 from pydantic import BaseModel, EmailStr, Field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import uvicorn
-import os
-from datetime import datetime, timedelta
-import jwt
-from jwt import PyJWTError
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from sqlalchemy.testing import db
-from starlette import status
-from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from passlib.context import CryptContext
-from pydantic import BaseModel
-from sqlalchemy import Boolean, Column, Integer, String
-from sqlalchemy.orm import declarative_base
-from fastapi.security import OAuth2PasswordBearer
-from pydantic import BaseModel
+import jwt
 
 Base = declarative_base()
 
@@ -47,11 +35,10 @@ class UserInDB(UserBase):
         orm_mode = True
 
 
-SQLALCHEMY_DATABASE_URL = "postgresql://User:Password@localhost:5432/newDB"
+SQLALCHEMY_DATABASE_URL = "postgresql://postgres:0939135697@localhost:5432/newDB"
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
 
 
 class Contact(Base):
@@ -65,7 +52,9 @@ class Contact(Base):
     birthday = Column(Date)
     additional_info = Column(String)
 
+
 Base.metadata.create_all(bind=engine)
+
 
 class ContactBase(BaseModel):
     first_name: str
@@ -75,8 +64,10 @@ class ContactBase(BaseModel):
     birthday: date
     additional_info: Optional[str] = None
 
+
 class ContactCreate(ContactBase):
     pass
+
 
 class ContactUpdate(ContactBase):
     first_name: Optional[str] = Field(None)
@@ -85,6 +76,7 @@ class ContactUpdate(ContactBase):
     phone: Optional[str] = Field(None)
     birthday: Optional[date] = Field(None)
     additional_info: Optional[str] = Field(None)
+
 
 class ContactInDB(BaseModel):
     id: int
@@ -98,12 +90,15 @@ class ContactInDB(BaseModel):
     class Config:
         orm_mode = True
 
+
 class Token(BaseModel):
     access_token: str
     token_type: str
 
+
 class TokenData(BaseModel):
     email: Optional[str] = None
+
 
 def get_db():
     db = SessionLocal()
@@ -111,6 +106,7 @@ def get_db():
         yield db
     finally:
         db.close()
+
 
 app = FastAPI()
 
@@ -159,16 +155,20 @@ def delete_contact(contact_id: int, db: Session = Depends(get_db)):
 
 @app.get("/contacts/search/", response_model=List[ContactInDB])
 def search_contacts(query: str, db: Session = Depends(get_db)):
-    contacts = db.query(Contact).filter((Contact.first_name.ilike('%{}%'.format(query))) |
-                                         (Contact.last_name.ilike('%{}%'.format(query))) |
-                                         (Contact.email.ilike('%{}%'.format(query)))).all()
+    contacts = db.query(Contact).filter(
+        (Contact.first_name.ilike(f"%{query}%")) |
+        (Contact.last_name.ilike(f"%{query}%")) |
+        (Contact.email.ilike(f"%{query}%"))
+    ).all()
     return contacts
 
 @app.get("/contacts/upcoming_birthdays", response_model=List[ContactInDB])
 def get_upcoming_birthdays(db: Session = Depends(get_db)):
     today = date.today()
     next_week = today + timedelta(days=7)
-    contacts = db.query(Contact).filter((Contact.birthday >= today) & (Contact.birthday <= next_week)).all()
+    contacts = db.query(Contact).filter(
+        (Contact.birthday >= today) & (Contact.birthday <= next_week)
+    ).all()
     return contacts
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -178,9 +178,6 @@ def verify_password(plain_password, hashed_password):
 
 def get_password_hash(password):
     return pwd_context.hash(password)
-
-def get_user(db: Session, user_id: int):
-    return db.query(User).filter(User.id == user_id).first()
 
 def get_user_by_email(db: Session, email: str):
     return db.query(User).filter(User.email == email).first()
@@ -201,23 +198,17 @@ def authenticate_user(db: Session, email: str, password: str):
         return False
     return user
 
+def get_user(db: Session, user_id: int):
+    return db.query(User).filter(User.id == user_id).first()
+
 SECRET_KEY = "your-secret-key"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-def create_access_token(*, data: dict, expires_delta: timedelta = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -228,10 +219,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         email: str = payload.get("sub")
         if email is None:
             raise credentials_exception
-        token_data = TokenData(email=email)
-    except PyJWTError:
+    except jwt.PyJWTError:
         raise credentials_exception
-    user = get_user_by_email(db, email=token_data.email)
+
+    user = get_user_by_email(db, email)
     if user is None:
         raise credentials_exception
     return user
@@ -257,6 +248,17 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
         data={"sub": user.email}, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+def create_access_token(*, data: dict, expires_delta: timedelta = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM).decode("utf-8")
+    return encoded_jwt
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000)
