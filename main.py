@@ -35,7 +35,7 @@ class UserInDB(UserBase):
         orm_mode = True
 
 
-SQLALCHEMY_DATABASE_URL = "postgresql://postgres:0939135697@localhost:5432/newDB"
+SQLALCHEMY_DATABASE_URL = "postgresql://User:Password@localhost:5432/newDB"
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
